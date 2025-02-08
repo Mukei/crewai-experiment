@@ -1,19 +1,17 @@
 research_task:
   description: >
-    Research the latest developments in artificial intelligence.
-    Focus on major breakthroughs, trends, and potential impacts in 2024.
+    Research the following topic: {topic}
+    Provide a comprehensive analysis including recent developments, key points, and relevant context.
   expected_output: >
-    A comprehensive overview of recent AI developments including
-    major breakthroughs, trends, and potential impacts.
+    A comprehensive analysis of {topic} with key findings and insights.
   agent: researcher
 
 writing_task:
   description: >
-    Write a 2-paragraph summary about the latest AI developments
-    based on the research findings.
+    Write a clear and engaging summary of the research findings about {topic}.
+    Format it in markdown with proper headings and bullet points where appropriate.
   expected_output: >
-    A clear, concise two-paragraph summary highlighting the
-    most significant recent developments in AI.
+    A well-formatted markdown summary of the research findings about {topic}.
   agent: writer
   context:
-    - research_task 
+    - research_task

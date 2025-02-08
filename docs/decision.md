@@ -142,4 +142,84 @@ Error Resolution: Prevents OpenAI fallback by eliminating provider ambiguity in 
    - Include base_url for local server
    - Use correct model name format
 
-This approach ensures proper integration with local Ollama instance. 
+This approach ensures proper integration with local Ollama instance.
+
+### Class-Based Architecture with YAML Configuration
+
+1. **Architectural Approach**:
+   - Status: Implemented
+   - Components:
+     - Standard class-based structure
+     - YAML configuration files
+     - Method-based agent and task definitions
+   - Rationale:
+     - Better compatibility with current CrewAI version
+     - Maintains clean separation of concerns
+     - Supports future migration to decorator-based approach
+
+2. **Implementation Details**:
+   - Components:
+     - ResearchCrew class with clear method responsibilities
+     - YAML-based configuration loading
+     - Dynamic task creation with templates
+     - Proper agent and task relationships
+   - Benefits:
+     - Clear code organization
+     - Easy to maintain and extend
+     - Configuration-driven approach
+     - Strong type hints and IDE support
+
+3. **Configuration Strategy**:
+   - Retained YAML files for:
+     - Agent configurations
+     - Task templates
+     - LLM settings
+   - Enhanced with:
+     - Dynamic topic injection
+     - Template-based task descriptions
+     - Proper context management between tasks
+
+4. **Design Decisions**:
+   - Keep configuration separate from code
+   - Use clear method names for components
+   - Maintain template-based approach for flexibility
+   - Support dynamic topic injection
+   - Preserve test coverage and maintainability
+
+This approach provides:
+- Clean separation of configuration and code
+- Easy migration path to decorator-based structure
+- Improved maintainability and type safety
+- Better test coverage and error handling
+
+Note: While CrewAI is moving towards a decorator-based approach, our current implementation maintains compatibility while being ready for future updates.
+
+### CrewAI Version and Architecture Investigation
+
+1. **Version Analysis**:
+   - Current Version: CrewAI 0.100.0
+   - Documentation suggests decorator-based approach with `CrewBase`
+   - Implementation found in `crewai.project` module
+   - Decision: Successfully implemented decorator-based approach
+
+2. **Import Structure**:
+   - `CrewBase` from `crewai.project.crew_base`
+   - Decorators from `crewai.project.annotations`
+   - Core components from `crewai` main package
+   - Maintains clean separation of concerns
+
+3. **Decorator Implementation**:
+   - `@CrewBase` for class-level configuration
+   - `@agent` for agent method definitions
+   - `@task` for task method definitions
+   - `@crew` for crew configuration
+   - Automatic configuration loading from YAML
+
+4. **Benefits of Current Approach**:
+   - Follows CrewAI's recommended patterns
+   - Better integration with CrewAI's features
+   - Automatic configuration management
+   - Clear component relationships
+   - Strong type safety and IDE support
+
+This investigation revealed that CrewAI's decorator-based pattern is fully supported in version 0.100.0, but requires importing from the correct module paths. Our implementation now follows the recommended approach while maintaining our configuration-driven architecture. 
