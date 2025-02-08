@@ -1,0 +1,28 @@
+[project]
+name = "crewai-experiment"
+version = "0.1.0"
+description = "A simple CrewAI experiment"
+authors = ["Your Name <your.email@example.com>"]
+channels = ["conda-forge"]
+platforms = ["osx-arm64"]
+
+[tasks]
+start = "python src/main.py"
+ui = "streamlit run src/ui/app.py"
+test = "pytest tests/"
+coverage-report = "pytest --cov=src --cov-report=html:coverage tests/"
+
+[dependencies]
+python = ">=3.10"
+pip = "*"
+
+[pypi-dependencies]
+crewai = "*"
+python-dotenv = "*"
+pyyaml = "*"
+streamlit = "*"
+streamlit-chat = "*"
+pytest = "*"
+pytest-asyncio = "*"
+pytest-mock = "*"
+pytest-cov = "*"
