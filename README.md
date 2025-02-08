@@ -1,6 +1,6 @@
 # CrewAI Experiment
 
-[![CI](https://github.com/username/crewai-experiment/actions/workflows/ci.yml/badge.svg)](https://github.com/username/crewai-experiment/actions/workflows/ci.yml)
+[![CI](https://github.com/Mukei/crewai-experiment/actions/workflows/ci.yml/badge.svg)](https://github.com/Mukei/crewai-experiment/actions/workflows/ci.yml)
 
 A research assistant powered by CrewAI with Streamlit UI and NeMo Guardrails.
 

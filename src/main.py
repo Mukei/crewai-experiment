@@ -4,7 +4,7 @@ from crew import ResearchCrew
 def main():
     """Run the CrewAI experiment."""
     # Initialize and run the crew
-    crew = ResearchCrew().crew()
+    crew = ResearchCrew().get_crew(topic="AI and Machine Learning")
     result = crew.kickoff()
 
     # Display the final output

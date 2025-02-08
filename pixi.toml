@@ -26,3 +26,4 @@ pytest = "*"
 pytest-asyncio = "*"
 pytest-mock = "*"
 pytest-cov = "*"
+google-search-results = "*"  # SerpAPI client
