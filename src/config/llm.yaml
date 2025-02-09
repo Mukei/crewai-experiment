@@ -1,6 +1,6 @@
 # LLM Configuration for Ollama
 ollama_llm:
-  model: "ollama/deepseek-r1"  # Explicitly specify ollama as provider
-  base_url: "http://localhost:11434"
+  model: "ollama/deepseek-r1"  # Using DeepSeek-R1 model as originally planned
+  api_base: "http://localhost:11434"
   temperature: 0.7
   api_key: "ollama"  # Dummy API key to satisfy LiteLLM validation 

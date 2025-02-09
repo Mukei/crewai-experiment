@@ -1,17 +1,82 @@
-research_task:
-  description: >
-    Research the following topic: {topic}
-    Provide a comprehensive analysis including recent developments, key points, and relevant context.
-  expected_output: >
-    A comprehensive analysis of {topic} with key findings and insights.
-  agent: researcher
+task_templates:
+  default_topic: "AI and Machine Learning"
+  research_task:
+    description: >
+      Research the following topic: {topic}
+      
+      Requirements:
+      1. Use the Web Search Tool to gather information by passing the topic directly.
+      2. IMPORTANT: Use the exact citations provided by the web search tool in your response.
+      3. Verify facts across different sources when possible.
+      4. Include ALL citations from the web search in your response.
+      5. Evaluate source credibility and relevance.
+      6. Provide a comprehensive analysis with recent developments.
 
-writing_task:
-  description: >
-    Write a clear and engaging summary of the research findings about {topic}.
-    Format it in markdown with proper headings and bullet points where appropriate.
-  expected_output: >
-    A well-formatted markdown summary of the research findings about {topic}.
-  agent: writer
-  context:
-    - research_task
+      Format your response with:
+      - Key findings with inline citations exactly as provided by the web search tool
+      - Critical analysis of the information
+      - Identification of any conflicting information
+      - Assessment of source reliability
+      - Include the complete bibliography section from the web search
+    expected_output: >
+      A comprehensive analysis of {topic} with:
+      1. Key findings and insights with proper citations
+      2. Source credibility assessment
+      3. Complete bibliography with all sources
+    agent: researcher
+
+  writing_task:
+    description: >
+      Write a clear and engaging summary of the research findings about {topic}.
+      
+      Requirements:
+      1. Use ALL citations from the research exactly as provided
+      2. Format in markdown with proper headings and bullet points
+      3. Include the complete bibliography section
+      4. Ensure every fact has its corresponding citation
+      5. Group related information from multiple sources
+      6. Maintain the exact citation format from the research
+    expected_output: >
+      A well-formatted markdown summary of the research findings about {topic},
+      including proper citations and a complete bibliography.
+    agent: writer
+    context:
+      - research_task
+
+  editing_task:
+    description: >
+      Review and evaluate the content for {topic}.
+      
+      Requirements:
+      1. Review the research and writing for accuracy and completeness
+      2. Verify that all citations are properly used
+      3. Check that the content fully addresses the topic
+      4. Evaluate the clarity and organization
+      5. Verify that all claims are supported by sources
+      6. Check for any gaps in information
+      
+      Your response MUST start with one of these status indicators:
+      - "APPROVED: " if the content meets all requirements
+      - "NEEDS REVISION: " if any issues are found
+      
+      If revision is needed, clearly specify:
+      1. What specific issues need to be addressed
+      2. Which aspects need improvement
+      3. What additional information is required
+      
+      Format your response as:
+      APPROVED: [Quality assessment and positive points]
+      
+      OR
+      
+      NEEDS REVISION:
+      - [Issue 1 with specific details]
+      - [Issue 2 with specific details]
+      - [Required improvements]
+    expected_output: >
+      A clear approval or detailed revision requirements for {topic},
+      starting with either "APPROVED: " or "NEEDS REVISION: "
+    agent: editor
+    context:
+      - research_task
+      - writing_task

@@ -81,29 +81,81 @@ def test_display_message_types(mock_streamlit):
 
 def test_handle_user_input_success(mock_streamlit):
     """Test successful user input handling."""
+    # Mock successful process_with_revisions
+    mock_streamlit.session_state.crew.process_with_revisions.return_value = {
+        "status": "approved",
+        "research": "Research output",
+        "content": "Content output",
+        "feedback": "APPROVED: Good quality"
+    }
+    
     handle_user_input("Test input")
     
-    assert len(mock_streamlit.session_state.messages) == 2
-    assert mock_streamlit.session_state.messages[0]["role"] == "user"
-    assert mock_streamlit.session_state.messages[0]["content"] == "Test input"
-    assert mock_streamlit.session_state.messages[1]["role"] == "assistant"
-    assert mock_streamlit.session_state.messages[1]["content"] == "Test response"
+    messages = mock_streamlit.session_state.messages
+    assert len(messages) == 4  # User input + Research + Content + Editor feedback
     
-    # Check that crew was called with correct topic
-    mock_streamlit.session_state.crew.get_crew.assert_called_once_with(topic="Test input")
-    mock_streamlit.markdown.assert_called_with("Test response")
+    # Check message sequence
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "Test input"
+    
+    assert messages[1]["role"] == "system"
+    assert "Research Results" in messages[1]["content"]
+    
+    assert messages[2]["role"] == "assistant"
+    assert messages[2]["content"] == "Content output"
+    
+    assert messages[3]["role"] == "system"
+    assert "Editor's Review" in messages[3]["content"]
+    
+    # Check content display
+    mock_streamlit.markdown.assert_called_with("Content output")
 
 def test_handle_user_input_error(mock_streamlit):
     """Test error handling in user input."""
     # Set up error condition
-    mock_streamlit.session_state.crew.get_crew.side_effect = Exception("Test error")
+    mock_streamlit.session_state.crew.process_with_revisions.side_effect = Exception("Test error")
     handle_user_input("Test input")
     
-    assert len(mock_streamlit.session_state.messages) == 2
-    assert mock_streamlit.session_state.messages[0]["role"] == "user"
-    assert mock_streamlit.session_state.messages[1]["role"] == "system"
-    assert "Error" in mock_streamlit.session_state.messages[1]["content"]
+    messages = mock_streamlit.session_state.messages
+    assert len(messages) == 2  # User input + Error message
+    
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "Test input"
+    
+    assert messages[1]["role"] == "system"
+    assert "Error" in messages[1]["content"]
+    
     mock_streamlit.error.assert_called_with("❌ Error: Test error")
+
+def test_handle_max_revisions(mock_streamlit):
+    """Test handling of max revisions reached."""
+    # Mock max revisions reached
+    mock_streamlit.session_state.crew.process_with_revisions.return_value = {
+        "status": "max_revisions",
+        "research": "Research output",
+        "content": "Content output",
+        "feedback": "NEEDS REVISION: Not quite there"
+    }
+    
+    handle_user_input("Test input")
+    
+    messages = mock_streamlit.session_state.messages
+    assert len(messages) == 4  # User input + Warning + Content + Editor feedback
+    
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == "Test input"
+    
+    assert messages[1]["role"] == "system"
+    assert "Maximum revision attempts reached" in messages[1]["content"]
+    
+    assert messages[2]["role"] == "assistant"
+    assert messages[2]["content"] == "Content output"
+    
+    assert messages[3]["role"] == "system"
+    assert "Editor's Review (Not Approved)" in messages[3]["content"]
+    
+    # Check warning display
+    mock_streamlit.warning.assert_called_with("⚠️ The content below has not been fully approved by the editor.")
 
 def test_handle_empty_input(mock_streamlit):
     """Test handling of empty input."""

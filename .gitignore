@@ -178,3 +178,8 @@ pixi.lock
 # OS
 .DS_Store
 Thumbs.db
+
+# Application logs
+logs/
+*.log
+logs/*.log.*

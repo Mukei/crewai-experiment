@@ -3,26 +3,57 @@ import re
 import streamlit as st
 from typing import Dict, List, Optional
 from src.crew import ResearchCrew
+from src.utils import main_logger as logger, error_logger
 
 def initialize_chat_state() -> None:
     """Initialize chat-related session state variables."""
-    if "messages" not in st.session_state:
+    logger.info("Initializing chat state")
+    
+    # Clear existing state
+    if "messages" in st.session_state:
         st.session_state.messages = []
-    if "crew" not in st.session_state:
-        # Initialize with a default topic that will be overridden when user inputs a topic
-        st.session_state.crew = ResearchCrew(default_topic="General Research")
-    if "progress" not in st.session_state:
-        st.session_state.progress = None
+    else:
+        st.session_state.messages = []
+    logger.debug("Initialized empty messages list")
+    
+    # Reset crew instance
+    if "crew" in st.session_state:
+        if hasattr(st.session_state.crew, '_cleanup_llm'):
+            st.session_state.crew._cleanup_llm()
+    st.session_state.crew = ResearchCrew()
+    logger.debug("Created new ResearchCrew instance")
+    
+    # Reset progress tracking
+    st.session_state.progress = None
+    st.session_state.progress_status = None
+    st.session_state.current_step = 0
+    st.session_state.last_processed_message = None  # Track last processed message
+    logger.debug("Initialized progress tracking")
+    
+    logger.info("Chat state initialization complete")
 
-def update_progress(message: str, progress: float) -> None:
+def update_progress(message: str, increment: float = None) -> None:
     """Update the progress bar and status message."""
+    logger.debug(f"Updating progress: {message} (increment: {increment})")
+    # Initialize progress components if needed
     if st.session_state.progress is None:
         st.session_state.progress = st.progress(0.0)
-    st.session_state.progress.progress(progress)
-    st.write(f"🤖 {message}")
+    if st.session_state.progress_status is None:
+        st.session_state.progress_status = st.empty()
+    
+    # Update progress if increment provided
+    if increment is not None:
+        current = st.session_state.current_step
+        new_progress = min(current + increment, 1.0)
+        st.session_state.current_step = new_progress
+        st.session_state.progress.progress(new_progress)
+        logger.debug(f"Progress updated to {new_progress:.1%}")
+    
+    st.session_state.progress_status.write(f"🤖 {message}")
 
 def format_message(content: str) -> Dict[str, str]:
     """Format message content based on its type."""
+    logger.debug(f"Formatting message: {content[:100]}...")
     # Check for code blocks
     if re.search(r"```[\s\S]+?```", content):
         return {"type": "code", "content": content}
@@ -34,6 +65,7 @@ def format_message(content: str) -> Dict[str, str]:
 
 def display_message(role: str, content: str) -> None:
     """Display a single chat message with appropriate formatting."""
+    logger.debug(f"Displaying message from {role}")
     with st.chat_message(role):
         formatted = format_message(content)
         if formatted["type"] == "code":
@@ -43,54 +75,79 @@ def display_message(role: str, content: str) -> None:
 
 def display_chat_messages() -> None:
     """Display all messages in the chat history."""
+    logger.debug(f"Displaying {len(st.session_state.messages)} chat messages")
     for message in st.session_state.messages:
         display_message(message["role"], message["content"])
 
 def handle_user_input(user_input: str) -> None:
     """Process user input and generate AI response."""
     if not user_input:
+        logger.debug("Empty user input received")
         return
+        
+    # Check if we've already processed this message
+    if st.session_state.get('last_processed_message') == user_input:
+        logger.debug("Skipping already processed message")
+        return
+        
+    logger.info(f"Processing user input: {user_input}")
+    st.session_state.last_processed_message = user_input
 
-    # Reset progress
-    st.session_state.progress = None
+    # Initialize progress tracking
+    st.session_state.progress = st.progress(0.0)
+    st.session_state.progress_status = st.empty()
+    st.session_state.current_step = 0
 
     # Add user message
     st.session_state.messages.append({"role": "user", "content": user_input})
-    
-    # Show AI response with loading indicator
-    with st.chat_message("assistant"):
-        try:
-            # Research phase
-            update_progress("Research Agent: Analyzing the topic...", 0.2)
-            crew = st.session_state.crew.get_crew(topic=user_input)
-            
-            update_progress("Research Agent: Gathering information...", 0.4)
-            # This is where we'll add web search integration
-            
-            update_progress("Research Agent: Synthesizing findings...", 0.6)
-            
-            update_progress("Writing Agent: Creating summary...", 0.8)
-            
-            response = crew.kickoff()
-            
-            update_progress("Complete!", 1.0)
-            
+    logger.debug("Added user message to chat history")
+
+    try:
+        # Update progress for research phase
+        update_progress("🔍 Researching topic...", 0.2)
+        
+        # Process the topic with revisions
+        content, status = st.session_state.crew.process_with_revisions(user_input)
+        
+        # Update progress for completion
+        update_progress("✅ Processing complete", 1.0)
+        
+        if content:
             # Add AI response
             st.session_state.messages.append({
                 "role": "assistant",
-                "content": response
+                "content": content
             })
-            # Display the response immediately
-            st.markdown(response)
-        except Exception as e:
-            error_msg = f"❌ Error: {str(e)}"
+            
+            # Add status message
             st.session_state.messages.append({
                 "role": "system",
-                "content": error_msg
+                "content": f"Status: {status}"
             })
-            st.error(error_msg)
-        finally:
-            # Clear progress after completion
-            if st.session_state.progress is not None:
-                st.session_state.progress.empty()
-            st.session_state.progress = None 
+            logger.debug("Added AI response and status to chat history")
+        else:
+            # Handle error case
+            error_message = "❌ I encountered an error while processing your request. Please try again."
+            st.session_state.messages.append({
+                "role": "system",
+                "content": error_message
+            })
+            logger.error("Failed to generate response")
+            
+    except Exception as e:
+        logger.error(f"Error processing user input: {str(e)}", exc_info=True)
+        error_message = f"❌ Error: {str(e)}"
+        st.session_state.messages.append({
+            "role": "system",
+            "content": error_message
+        })
+        
+    finally:
+        # Clear progress tracking
+        if st.session_state.progress:
+            st.session_state.progress.empty()
+        if st.session_state.progress_status:
+            st.session_state.progress_status.empty()
+        st.session_state.progress = None
+        st.session_state.progress_status = None
+        st.session_state.current_step = 0 
