@@ -7,7 +7,8 @@ from src.ui.components.chat import (
     display_chat_messages,
     handle_user_input,
     format_message,
-    display_message
+    display_message,
+    update_progress
 )
 
 @pytest.fixture
@@ -82,80 +83,45 @@ def test_display_message_types(mock_streamlit):
 def test_handle_user_input_success(mock_streamlit):
     """Test successful user input handling."""
     # Mock successful process_with_revisions
-    mock_streamlit.session_state.crew.process_with_revisions.return_value = {
-        "status": "approved",
-        "research": "Research output",
-        "content": "Content output",
-        "feedback": "APPROVED: Good quality"
-    }
-    
+    mock_streamlit.session_state.crew.process_with_revisions.return_value = "Content output"
+
     handle_user_input("Test input")
-    
+
     messages = mock_streamlit.session_state.messages
-    assert len(messages) == 4  # User input + Research + Content + Editor feedback
-    
-    # Check message sequence
+    assert len(messages) == 2  # User input + Content
     assert messages[0]["role"] == "user"
     assert messages[0]["content"] == "Test input"
-    
-    assert messages[1]["role"] == "system"
-    assert "Research Results" in messages[1]["content"]
-    
-    assert messages[2]["role"] == "assistant"
-    assert messages[2]["content"] == "Content output"
-    
-    assert messages[3]["role"] == "system"
-    assert "Editor's Review" in messages[3]["content"]
-    
-    # Check content display
-    mock_streamlit.markdown.assert_called_with("Content output")
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["content"] == "Content output"
 
 def test_handle_user_input_error(mock_streamlit):
     """Test error handling in user input."""
     # Set up error condition
     mock_streamlit.session_state.crew.process_with_revisions.side_effect = Exception("Test error")
     handle_user_input("Test input")
-    
+
     messages = mock_streamlit.session_state.messages
     assert len(messages) == 2  # User input + Error message
-    
+
     assert messages[0]["role"] == "user"
     assert messages[0]["content"] == "Test input"
-    
-    assert messages[1]["role"] == "system"
-    assert "Error" in messages[1]["content"]
-    
-    mock_streamlit.error.assert_called_with("❌ Error: Test error")
+
+    assert messages[1]["role"] == "assistant"
+    assert "❌ Error: Test error" in messages[1]["content"]
 
 def test_handle_max_revisions(mock_streamlit):
     """Test handling of max revisions reached."""
     # Mock max revisions reached
-    mock_streamlit.session_state.crew.process_with_revisions.return_value = {
-        "status": "max_revisions",
-        "research": "Research output",
-        "content": "Content output",
-        "feedback": "NEEDS REVISION: Not quite there"
-    }
-    
+    mock_streamlit.session_state.crew.process_with_revisions.return_value = "Max revisions reached"
+
     handle_user_input("Test input")
-    
+
     messages = mock_streamlit.session_state.messages
-    assert len(messages) == 4  # User input + Warning + Content + Editor feedback
-    
+    assert len(messages) == 2  # User input + Warning
     assert messages[0]["role"] == "user"
     assert messages[0]["content"] == "Test input"
-    
-    assert messages[1]["role"] == "system"
-    assert "Maximum revision attempts reached" in messages[1]["content"]
-    
-    assert messages[2]["role"] == "assistant"
-    assert messages[2]["content"] == "Content output"
-    
-    assert messages[3]["role"] == "system"
-    assert "Editor's Review (Not Approved)" in messages[3]["content"]
-    
-    # Check warning display
-    mock_streamlit.warning.assert_called_with("⚠️ The content below has not been fully approved by the editor.")
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["content"] == "Max revisions reached"
 
 def test_handle_empty_input(mock_streamlit):
     """Test handling of empty input."""
@@ -177,3 +143,117 @@ def test_format_message():
         message = format_message(content)
         assert message["type"] == expected_type
         assert message["content"] == content 
+
+def test_update_progress(mock_streamlit):
+    """Test progress bar updates."""
+    # Set up initial state
+    mock_streamlit.session_state.current_step = 0
+    mock_streamlit.session_state.total_steps = 3
+    mock_streamlit.session_state.progress = None
+    mock_streamlit.session_state.status = None
+    
+    # Initial update
+    update_progress("Researcher", 0, 3, "Starting task")
+    assert mock_streamlit.session_state.current_step == 0
+    assert mock_streamlit.session_state.total_steps == 3
+    assert mock_streamlit.session_state.progress == "Researcher: Starting task"
+    
+    # Subsequent update
+    update_progress("Writer", 1, 3, "In progress")
+    assert mock_streamlit.session_state.current_step == 1
+    assert mock_streamlit.session_state.total_steps == 3
+    assert mock_streamlit.session_state.progress == "Writer: In progress"
+    
+    # Final update
+    update_progress("Editor", 3, 3, "Complete")
+    assert mock_streamlit.session_state.current_step == 3
+    assert mock_streamlit.session_state.total_steps == 3
+    assert mock_streamlit.session_state.progress == "Editor: Complete"
+
+def test_handle_user_input_with_special_characters(mock_streamlit):
+    """Test handling input with special characters."""
+    mock_streamlit.session_state.crew.process_with_revisions.return_value = "Processed @#$%^&*"
+    handle_user_input("Test @#$%^&*")
+    
+    messages = mock_streamlit.session_state.messages
+    assert messages[0]["content"] == "Test @#$%^&*"
+    assert messages[1]["content"] == "Processed @#$%^&*"
+
+def test_handle_user_input_with_markdown(mock_streamlit):
+    """Test handling input with markdown formatting."""
+    mock_streamlit.session_state.crew.process_with_revisions.return_value = "# Test Header\n\n- Point 1\n- Point 2"
+    handle_user_input("Test markdown")
+    
+    messages = mock_streamlit.session_state.messages
+    assert len(messages) == 2
+    assert messages[1]["content"].startswith("# Test Header")
+
+def test_handle_user_input_with_code_blocks(mock_streamlit):
+    """Test handling input with code blocks."""
+    response = "```python\nprint('hello')\n```"
+    mock_streamlit.session_state.crew.process_with_revisions.return_value = response
+    handle_user_input("Test code")
+    
+    messages = mock_streamlit.session_state.messages
+    assert len(messages) == 2
+    assert messages[1]["content"] == response
+
+def test_format_message_with_mixed_content(mock_streamlit):
+    """Test message formatting with mixed content."""
+    # Test code block detection
+    content = "# Header\n\nNormal text\n\n```python\ncode=True\n```"
+    formatted = format_message(content)
+    assert formatted["type"] == "code"
+    assert formatted["content"] == content
+    
+    # Test markdown detection
+    content = "# Header\n\nNormal text\n\nNo code blocks here"
+    formatted = format_message(content)
+    assert formatted["type"] == "markdown"
+    assert formatted["content"] == content
+    
+    # Test regular text
+    content = "Just some regular text without special formatting"
+    formatted = format_message(content)
+    assert formatted["type"] == "text"
+    assert formatted["content"] == content
+
+def test_display_message_with_error(mock_streamlit):
+    """Test displaying error messages."""
+    error_content = "❌ Error: Test error"
+    display_message("assistant", error_content)
+    mock_streamlit.chat_message.assert_called_with("assistant")
+    mock_streamlit.markdown.assert_called_with(error_content)
+
+def test_initialize_chat_state_cleanup(mock_streamlit, mock_research_crew):
+    """Test chat state cleanup during initialization."""
+    # Set up existing state
+    mock_streamlit.session_state.messages = ["old message"]
+    mock_streamlit.session_state.progress = "old progress"
+    mock_streamlit.session_state.current_step = 0.5
+    
+    # Mock existing crew with cleanup method
+    mock_crew = MagicMock()
+    mock_cleanup = MagicMock()
+    mock_crew._cleanup_llm = mock_cleanup
+    mock_streamlit.session_state.crew = mock_crew
+    
+    # Create new mock crew instance for initialization
+    new_crew = MagicMock()
+    mock_research_crew.return_value = new_crew
+    
+    # Mock 'in' operator for session_state
+    def mock_contains(self, key):
+        return key in ["messages", "crew"]
+    type(mock_streamlit.session_state).__contains__ = mock_contains
+    
+    # Mock hasattr to return True for _cleanup_llm
+    with patch('builtins.hasattr', return_value=True):
+        initialize_chat_state()
+    
+    # Verify cleanup
+    mock_cleanup.assert_called_once()
+    assert mock_streamlit.session_state.messages == []
+    assert mock_streamlit.session_state.progress is None
+    assert mock_streamlit.session_state.current_step == 0
+    assert mock_streamlit.session_state.crew == new_crew 

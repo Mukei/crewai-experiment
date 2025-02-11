@@ -2,33 +2,177 @@
 from pathlib import Path
 from typing import Callable, Dict, Any, List, Optional, Union, Tuple
 from crewai import Agent, Task, Crew, LLM
-from crewai.tools import tool
+from crewai.tools import BaseTool
 from crewai.project.crew_base import CrewBase
 from crewai.project.annotations import agent, task, crew
 from src.tools.web_search import WebSearchTool
+from src.utils.file_manager import FileManager
+from src.utils.progress_tracker import ProgressTracker
 import yaml
 from src.config import CONFIG_DIR
-from src.utils import crew_logger as logger, error_logger
+from src.utils.logging_config import crew_logger as logger, error_logger
 import time
+import signal
+import uuid
+import threading
+import sys
 
 @CrewBase
 class ResearchCrew:
     """Crew for AI research and content creation."""
 
-    def __init__(self):
-        """Initialize the research crew with configuration."""
+    def __init__(self, progress_callback: Optional[Callable] = None, session_id: Optional[str] = None):
+        """Initialize the ResearchCrew."""
         logger.info("Initializing ResearchCrew")
+        
+        # Store session ID
+        self._session_id = session_id or str(uuid.uuid4())
+        logger.info(f"Using session: {self._session_id}")
+        
+        # Initialize file manager and progress tracker
+        self._file_manager = FileManager(base_dir="temp")
+        self._progress_tracker = ProgressTracker(session_id=self._session_id)
+        self._progress_callback = progress_callback
+        
+        # Load configurations
         self._llm_config = self._load_llm_config()
         self._task_templates = self._load_task_templates()
         self._agent_configs = self._load_agent_configs()
+        
+        # Initialize LLM and tools
         self._llm = self._create_llm()
+        self.web_search = WebSearchTool()
+        
+        # Register signal handlers if in main thread
+        if threading.current_thread() is threading.main_thread():
+            self._register_signal_handlers()
+        
+        # Store current topic
+        self._current_topic = None
+        
+        logger.info("ResearchCrew initialization complete")
+
+    def _register_signal_handlers(self):
+        """Register signal handlers for cleanup."""
+        def cleanup_handler(signum, frame):
+            """Handle cleanup on signal."""
+            logger.info(f"Received signal {signum}")
+            self.cleanup()
+            sys.exit(0)
+            
+        # Register handlers for SIGINT and SIGTERM
+        signal.signal(signal.SIGINT, cleanup_handler)
+        signal.signal(signal.SIGTERM, cleanup_handler)
+
+    def _cleanup(self):
+        """Cleanup resources."""
+        errors = []
+        
+        # Clean up LLM
+        if hasattr(self, '_llm'):
+            try:
+                self._cleanup_llm()
+            except Exception as e:
+                errors.append(f"LLM cleanup error: {str(e)}")
+                logger.error(f"Error during LLM cleanup: {str(e)}")
+        
+        # Clean up file manager
+        if hasattr(self, '_file_manager'):
+            try:
+                self._file_manager.cleanup()
+            except Exception as e:
+                errors.append(f"File manager cleanup error: {str(e)}")
+                logger.error(f"Error during file manager cleanup: {str(e)}")
+        
+        # Clean up progress tracker
+        if hasattr(self, '_progress_tracker'):
+            try:
+                self._progress_tracker.cleanup()
+            except Exception as e:
+                errors.append(f"Progress tracker cleanup error: {str(e)}")
+                logger.error(f"Error during progress tracker cleanup: {str(e)}")
+        
+        # Log all errors if any occurred
+        if errors:
+            error_msg = "Multiple cleanup errors occurred:\n" + "\n".join(errors)
+            logger.error(error_msg)
+
+    def cleanup(self):
+        """Public method to cleanup resources."""
         try:
-            logger.info("Initializing web search tool...")
-            self.web_search = WebSearchTool()
-            logger.info("Web search tool initialized successfully")
+            self._cleanup()
         except Exception as e:
-            error_logger.error(f"Failed to initialize web search tool: {str(e)}", exc_info=True)
-            self.web_search = None
+            logger.error(f"Error during cleanup: {str(e)}")
+            # Don't re-raise to ensure cleanup completes
+
+    def _recover_state(self, session_id: str) -> None:
+        """Recover state from a previous session.
+        
+        Args:
+            session_id: Session ID to recover
+        """
+        try:
+            logger.info(f"Attempting to recover state for session {session_id}")
+            
+            # Recover file state
+            state = self._file_manager.recover_session(session_id)
+            if not state:
+                logger.warning("No file state found for recovery")
+                return
+            
+            # Recover progress
+            progress = self._progress_tracker.recover_progress()
+            if not progress:
+                logger.warning("No progress state found for recovery")
+                return
+            
+            logger.info("State recovered successfully")
+            self._report_progress(
+                "System",
+                progress.get("current_step", 0),
+                progress.get("total_steps", 3),
+                "Recovered previous session state"
+            )
+        except Exception as e:
+            logger.error(f"Error recovering state: {str(e)}")
+            self._progress_tracker.log_error(f"Failed to recover state: {str(e)}")
+
+    def save_checkpoint(self) -> None:
+        """Save a checkpoint of the current state."""
+        try:
+            logger.info("Saving checkpoint")
+            # Progress is automatically saved by ProgressTracker
+            # Files are automatically saved by FileManager
+            # Just log the checkpoint
+            self._progress_tracker.update_progress(
+                "System",
+                self._progress_tracker.get_current_progress().get("current_step", 0),
+                self._progress_tracker.get_current_progress().get("total_steps", 3),
+                "Checkpoint saved"
+            )
+            logger.info("Checkpoint saved successfully")
+        except Exception as e:
+            logger.error(f"Error saving checkpoint: {str(e)}")
+            self._progress_tracker.log_error(f"Failed to save checkpoint: {str(e)}")
+
+    def _handle_interrupt(self, signum, frame):
+        """Handle interrupt signals."""
+        logger.info(f"Received signal {signum}")
+        self.cleanup()
+        
+    def _report_progress(self, agent: str, step: int, total: int, status: str) -> None:
+        """Report progress through callback and tracker."""
+        try:
+            # Update progress tracker
+            self._progress_tracker.update_progress(agent, step, total, status)
+            
+            # Call progress callback if available
+            if self._progress_callback:
+                self._progress_callback(agent, step, total, status)
+                
+            logger.debug(f"Progress updated: {agent} - Step {step}/{total} - {status}")
+        except Exception as e:
+            logger.error(f"Error in progress reporting: {str(e)}")
 
     def _load_llm_config(self) -> Dict:
         """Load LLM configuration from YAML."""
@@ -40,21 +184,34 @@ class ResearchCrew:
         return config['ollama_llm']
 
     def _create_llm(self) -> LLM:
-        """Create LLM instance with configuration."""
+        """Create an LLM instance with the loaded configuration."""
+        logger.info("Creating LLM instance")
         try:
-            logger.info("Creating LLM instance")
-            llm = LLM(
-                model=self._llm_config['model'],
-                base_url=self._llm_config['api_base'],
-                temperature=self._llm_config['temperature'],
-                api_key=self._llm_config['api_key'],
-                timeout=30  # Add timeout to prevent hanging
-            )
-            logger.info(f"LLM instance created successfully with model {self._llm_config['model']}")
-            return llm
+            # Add retry logic for LLM creation
+            max_retries = 3
+            retry_count = 0
+            last_error = None
+            
+            while retry_count < max_retries:
+                try:
+                    llm = LLM(
+                        model=self._llm_config.get('model', 'ollama/deepseek-r1'),
+                        base_url=self._llm_config.get('base_url', 'http://localhost:11434'),
+                        temperature=self._llm_config.get('temperature', 0.7),
+                        api_key=self._llm_config.get('api_key', 'not-needed'),
+                        max_tokens=self._llm_config.get('max_tokens', 2048)
+                    )
+                    logger.info(f"LLM instance created successfully with model {self._llm_config.get('model')}")
+                    return llm
+                except Exception as e:
+                    last_error = e
+                    retry_count += 1
+                    logger.warning(f"LLM creation attempt {retry_count} failed: {str(e)}")
+                    time.sleep(1)  # Wait before retrying
+            
+            raise last_error
         except Exception as e:
-            error_msg = f"Failed to create LLM: {str(e)}"
-            error_logger.error(error_msg, exc_info=True)
+            logger.error(f"Failed to create LLM: {str(e)}")
             raise
 
     def _cleanup_llm(self) -> None:
@@ -62,9 +219,15 @@ class ResearchCrew:
         if hasattr(self, '_llm') and self._llm is not None:
             try:
                 logger.info("Cleaning up LLM resources")
-                # Give time for any pending operations to complete
-                time.sleep(1)
+                # Store the LLM instance temporarily
+                temp_llm = self._llm
                 self._llm = None
+                # Ensure we have a bit of time for pending operations
+                time.sleep(1)  # Increased wait time
+                # Clean up the old instance
+                if hasattr(temp_llm, 'cleanup'):
+                    temp_llm.cleanup()
+                del temp_llm
                 logger.info("LLM resources cleaned up successfully")
             except Exception as e:
                 logger.error(f"Error during LLM cleanup: {str(e)}")
@@ -81,11 +244,37 @@ class ResearchCrew:
     def _load_task_templates(self) -> Dict:
         """Load task templates from YAML."""
         logger.info("Loading task templates")
-        config_path = CONFIG_DIR / 'tasks.yaml'
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
-        logger.debug(f"Loaded {len(config['task_templates'])} task templates")
-        return config['task_templates']
+        try:
+            config_path = CONFIG_DIR / 'tasks.yaml'
+            logger.debug(f"Loading task templates from: {config_path}")
+            
+            with open(config_path) as f:
+                raw_yaml = f.read()
+                logger.debug(f"Raw YAML content:\n{raw_yaml}")
+                config = yaml.safe_load(raw_yaml)
+                
+            logger.debug(f"Loaded config: {config}")
+            templates = config.get('task_templates', {})
+            logger.debug(f"Extracted templates: {templates}")
+            
+            if not templates:
+                raise ValueError("No task templates found in configuration")
+                
+            # Validate template structure
+            required_tasks = ['research_task', 'writing_task', 'editing_task']
+            for task in required_tasks:
+                if task not in templates:
+                    raise ValueError(f"Missing required task template: {task}")
+                if not isinstance(templates[task], dict):
+                    raise ValueError(f"Invalid template format for {task}")
+                if 'description' not in templates[task] or 'expected_output' not in templates[task]:
+                    raise ValueError(f"Missing required fields in {task} template")
+            
+            logger.info(f"Successfully loaded {len(templates)} task templates")
+            return templates
+        except Exception as e:
+            logger.error(f"Error loading task templates: {str(e)}")
+            raise
 
     def _load_agent_configs(self) -> Dict:
         """Load agent configurations from YAML."""
@@ -121,202 +310,157 @@ class ResearchCrew:
         """Create a CrewAI Tool for web search."""
         logger.info("Creating web search tool")
         
-        if not self.web_search:
-            logger.warning("Web search tool not available - SERPAPI_KEY missing")
+        try:
+            web_search = WebSearchTool()
+            if not web_search.api_key:
+                logger.warning("Web search tool not available - SERPAPI_KEY missing")
+                return None
+            return web_search
+        except Exception as e:
+            logger.error(f"Failed to create web search tool: {str(e)}")
             return None
-            
-        @tool("Web Search Tool")
-        def web_search(topic: str) -> str:
-            """Search the web for information about a given topic."""
-            try:
-                results = self._perform_web_search(topic)
-                if not results:
-                    return "⚠️ No search results found. Please check your query or try again."
-                return results
-            except Exception as e:
-                logger.error(f"Web search failed: {str(e)}", exc_info=True)
-                return f"⚠️ Web search failed: {str(e)}"
-        
-        return web_search
 
     @agent
     def researcher(self) -> Agent:
         """Create the researcher agent."""
-        logger.info("Creating researcher agent")
-        config = self._agent_configs["researcher"].copy()
+        config = self._agent_configs["researcher"]
         tools = []
         
         # Create and add web search tool
-        web_search_tool = self._create_web_search_tool()
-        if web_search_tool:
-            logger.info("Adding web search tool to researcher agent")
-            tools.append(web_search_tool)
-        else:
-            logger.warning("Researcher will proceed without web search capability")
-            
-        config['tools'] = tools
-        config['llm'] = self._llm
-        logger.debug(f"Researcher agent config: {config}")
-        return Agent(**config)
+        web_search = self._create_web_search_tool()
+        if web_search:
+            tools.append(web_search)
+            logger.info("Added web search tool to researcher agent")
+        
+        return Agent(
+            role=config['role'],
+            goal=config['goal'],
+            backstory=config['backstory'],
+            tools=tools,
+            llm=self._llm,
+            verbose=config.get('verbose', True)
+        )
 
     @agent
     def writer(self) -> Agent:
         """Create the writer agent."""
-        logger.info("Creating writer agent")
-        config = self._agent_configs["writer"].copy()
-        config['llm'] = self._llm
-        logger.debug(f"Writer agent config: {config}")
-        return Agent(**config)
+        config = self._agent_configs["writer"]
+        return Agent(
+            role=config['role'],
+            goal=config['goal'],
+            backstory=config['backstory'],
+            llm=self._llm,
+            verbose=config.get('verbose', True)
+        )
 
     @agent
     def editor(self) -> Agent:
         """Create the editor agent."""
-        logger.info("Creating editor agent")
-        config = self._agent_configs["editor"].copy()
-        config['llm'] = self._llm
-        logger.debug(f"Editor agent config: {config}")
-        return Agent(**config)
+        config = self._agent_configs["editor"]
+        return Agent(
+            role=config['role'],
+            goal=config['goal'],
+            backstory=config['backstory'],
+            llm=self._llm,
+            verbose=config.get('verbose', True)
+        )
 
     @task
-    def research_task(self, topic: str = None) -> Task:
-        """Create the research task."""
-        topic = topic or self._task_templates["default_topic"]
-        logger.info(f"Creating research task for topic: {topic}")
-        config = self._task_templates["research_task"]
-        description = config["description"].format(topic=topic)
+    def research_task(self) -> Task:
+        """Create a research task."""
+        if not self._current_topic:
+            raise ValueError("No topic set for research task")
         
-        # Add web search instructions if available
-        if self.web_search:
-            description += "\nUse the web_search tool to gather recent information and verify facts."
-        
-        task = Task(
-            description=description,
-            expected_output=config["expected_output"].format(topic=topic),
+        template = self._task_templates['research_task']
+        return Task(
+            description=template['description'].format(topic=self._current_topic),
+            expected_output=template['expected_output'].format(topic=self._current_topic),
             agent=self.researcher()
         )
-        logger.debug(f"Research task created: {task}")
-        return task
 
     @task
-    def writing_task(self, topic: str = None, research_output: str = None) -> Task:
-        """Create the writing task."""
-        topic = topic or self._task_templates["default_topic"]
-        logger.info(f"Creating writing task for topic: {topic}")
-        config = self._task_templates["writing_task"]
-        task = Task(
-            description=config["description"].format(topic=topic),
-            expected_output=config["expected_output"].format(topic=topic),
-            agent=self.writer(),
-            context=[self.research_task(topic)] if not research_output else [research_output]
+    def writing_task(self) -> Task:
+        """Create a writing task."""
+        if not self._current_topic:
+            raise ValueError("No topic set for writing task")
+            
+        template = self._task_templates['writing_task']
+        return Task(
+            description=template['description'].format(topic=self._current_topic),
+            expected_output=template['expected_output'].format(topic=self._current_topic),
+            agent=self.writer()
         )
-        logger.debug(f"Writing task created: {task}")
-        return task
 
     @task
-    def editing_task(self, topic: str = None, research_output: str = None, writing_output: str = None) -> Task:
-        """Create the editing task."""
-        topic = topic or self._task_templates["default_topic"]
-        logger.info(f"Creating editing task for topic: {topic}")
-        config = self._task_templates["editing_task"]
-        context = []
-        if research_output:
-            context.append(research_output)
-        if writing_output:
-            context.append(writing_output)
-        if not context:
-            context = [self.research_task(topic), self.writing_task(topic)]
-        
-        task = Task(
-            description=config["description"].format(topic=topic),
-            expected_output=config["expected_output"].format(topic=topic),
-            agent=self.editor(),
-            context=context
+    def editing_task(self) -> Task:
+        """Create an editing task."""
+        if not self._current_topic:
+            raise ValueError("No topic set for editing task")
+            
+        template = self._task_templates['editing_task']
+        return Task(
+            description=template['description'].format(topic=self._current_topic),
+            expected_output=template['expected_output'].format(topic=self._current_topic),
+            agent=self.editor()
         )
-        logger.debug(f"Editing task created: {task}")
-        return task
 
     @crew
     def get_crew(self, topic: str) -> Crew:
         """Get a crew for the given topic."""
+        self._current_topic = topic
         logger.info(f"Creating crew for topic: {topic}")
         
-        # Initialize LLM if not already done
-        if not hasattr(self, '_llm') or self._llm is None:
-            self._llm = self._create_llm()
-        
-        # Create tasks
-        research_task = self.research_task(topic)
-        writing_task = self.writing_task(topic)
-        editing_task = self.editing_task(topic)
-        
-        # Create agents with the same LLM instance
-        researcher = self.researcher()
-        writer = self.writer()
-        editor = self.editor()
-        
-        # Create and return crew
-        crew = Crew(
-            agents=[researcher, writer, editor],
-            tasks=[research_task, writing_task, editing_task],
+        return Crew(
+            agents=[
+                self.researcher(),
+                self.writer(),
+                self.editor()
+            ],
+            tasks=[
+                self.research_task(),
+                self.writing_task(),
+                self.editing_task()
+            ],
             verbose=True
         )
-        
-        return crew
 
-    def process_with_revisions(self, topic: str, max_revisions: int = 3) -> Tuple[str, str]:
+    def process_with_revisions(self, topic: Optional[str] = None, max_revisions: int = 3) -> str:
         """Process a topic with revisions until approved or max revisions reached."""
-        logger.info(f"Starting process with revisions for topic: {topic} (max_revisions={max_revisions})")
+        if not topic:
+            logger.warning("No topic provided, using default")
+            topic = self._task_templates.get("default_topic", "AI and Machine Learning")
         
-        revision_count = 0
-        last_content = ""
-        last_feedback = ""
+        self._current_topic = topic
+        logger.info(f"Starting process with revisions for topic: {topic}")
         
         try:
-            while revision_count < max_revisions:
-                logger.info(f"Starting revision {revision_count + 1}")
-                
-                # Get crew with shared LLM instance
-                crew = self.get_crew(topic)
-                
-                # Add previous feedback to context if available
-                if last_feedback:
-                    logger.info("Adding previous feedback to context")
-                    for task in crew.tasks:
-                        task.context.append(f"Previous feedback: {last_feedback}")
-                
-                # Run the crew tasks
-                results = crew.kickoff()
-                
-                # Process results
-                if isinstance(results, str):
-                    content = results
-                    feedback = "No explicit feedback provided"
-                else:
-                    content = results[1] if len(results) > 1 else results[0]
-                    feedback = results[2] if len(results) > 2 else "No explicit feedback provided"
-                
-                # Check for approval
-                if feedback.startswith("APPROVED:"):
-                    logger.info("Content approved by editor")
-                    return content, "Content approved by editor"
-                
-                # Store for next iteration
-                last_content = content
-                last_feedback = feedback
-                revision_count += 1
-                
-                logger.info(f"Content needs revision. Feedback: {feedback}")
-                
-                # Clean up LLM before next iteration
-                self._cleanup_llm()
+            crew = self.get_crew(topic)
+            result = crew.kickoff()
             
-            # Max revisions reached
-            logger.warning(f"Maximum revisions ({max_revisions}) reached without approval")
-            return last_content, f"⚠️ Maximum revisions ({max_revisions}) reached. Last feedback: {last_feedback}"
+            # Handle different result types
+            if result is None:
+                error_msg = "Error: No response received from crew"
+                logger.error(error_msg)
+                return error_msg
+            
+            # Convert result to string if it's not already
+            final_result = str(result)
+            
+            # Check if the editor approved the content
+            if "APPROVED:" in final_result:
+                logger.info("Content approved by editor")
+            elif "NEEDS REVISION:" in final_result:
+                logger.info("Content needs revision - check editor's feedback")
+            else:
+                logger.warning("Unexpected editor response format")
+            
+            return final_result
                 
         except Exception as e:
-            logger.error(f"Error during crew execution: {str(e)}", exc_info=True)
-            self._cleanup_llm()
-            raise
+            error_msg = f"Error during crew execution: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return error_msg
         finally:
-            self._cleanup_llm() 
+            # Delay cleanup to ensure all operations are complete
+            time.sleep(1)
+            self.cleanup()

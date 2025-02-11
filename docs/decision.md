@@ -311,4 +311,162 @@ This investigation revealed that CrewAI's decorator-based pattern is fully suppo
      - Maintain information accuracy
      - Support fact-checking
 
-This enhancement focuses on improving research quality through better source management and traceability, while maintaining the system's ease of use and performance. 
+This enhancement focuses on improving research quality through better source management and traceability, while maintaining the system's ease of use and performance.
+
+### Streamlit State Management Strategy
+
+1. **Initial Implementation Issues**:
+   - Status: Identified
+   - Problems:
+     - Double initialization of ResearchCrew
+     - Resource cleanup inconsistency
+     - Session state conflicts
+   - Impact:
+     - Memory leaks
+     - Performance degradation
+     - Unstable application state
+
+2. **Revised Implementation**:
+   - Status: In Progress
+   - Components:
+     - Singleton pattern for ResearchCrew
+     - Proper session state initialization
+     - Resource cleanup hooks
+   - Benefits:
+     - Single source of truth
+     - Consistent application state
+     - Better resource management
+     - Improved performance
+
+3. **Implementation Details**:
+   ```python
+   # Singleton pattern with session state
+   if 'crew' not in st.session_state:
+       st.session_state.crew = ResearchCrew()
+   
+   # Resource cleanup
+   def cleanup():
+       if hasattr(st.session_state, 'crew'):
+           st.session_state.crew._cleanup_llm()
+   
+   # Register cleanup
+   st.session_state.on_cleanup = cleanup
+   ```
+
+4. **Testing Strategy**:
+   - Unit tests for initialization
+   - Integration tests for state management
+   - UI tests for component lifecycle
+   - Resource cleanup verification
+
+This approach ensures:
+- Single ResearchCrew instance per session
+- Proper resource management
+- Consistent application state
+- Better testability
+
+### Agent Communication Strategy
+
+1. **File-Based Communication**:
+   - Status: To be implemented
+   - Implementation:
+     - Use JSON files for structured data
+     - Use MD files for content and research
+     - Temporary file management for session
+   - Benefits:
+     - Better state persistence
+     - Crash recovery capability
+     - Easier debugging
+     - Clear data flow tracking
+
+2. **File Structure**:
+   ```
+   temp/
+   ├── research/
+   │   ├── {session_id}_research.md    # Research findings
+   │   └── {session_id}_sources.json   # Source metadata
+   ├── writing/
+   │   ├── {session_id}_draft.md      # Initial content
+   │   └── {session_id}_citations.json # Citation mapping
+   └── editing/
+       ├── {session_id}_review.md     # Editor's review
+       └── {session_id}_final.md      # Final approved content
+   ```
+
+3. **Implementation Plan**:
+   - Phase 1: Topic Handling (Current)
+     - Implement file-based communication
+     - Add session management
+     - Update agent interactions
+   - Phase 2: E2E Testing
+     - Add file-based test fixtures
+     - Implement cleanup in tests
+     - Add file content validation
+   - Phase 3: Crash Handling
+     - Add file-based state recovery
+     - Implement cleanup on signals
+     - Add session recovery
+   - Phase 4: Progress Display
+     - Track progress via file changes
+     - Add file-based checkpoints
+     - Implement progress recovery
+
+4. **Benefits**:
+   - Improved reliability through persistence
+   - Better error recovery
+   - Clear data flow between agents
+   - Easier debugging and testing
+   - State recovery after crashes
+
+This approach will help address our current issues while improving system reliability and maintainability.
+
+### Logging Strategy Implementation
+
+1. **Centralized Logging Configuration**:
+   - Status: Implemented
+   - Components:
+     - Dedicated loggers for each component
+     - Consistent formatting across all logs
+     - Both file and console output
+   - Benefits:
+     - Better debugging capabilities
+     - Clear separation of concerns
+     - Easier log analysis
+     - Improved error tracking
+
+2. **Logger Structure**:
+   - Main Logger: General application logs
+   - Crew Logger: CrewAI operations
+   - File Manager Logger: File operations
+   - Progress Tracker Logger: Progress updates
+   - UI Logger: User interface events
+   - Error Logger: Critical issues
+
+3. **Implementation Details**:
+   ```python
+   # Log format
+   LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+   
+   # Log levels
+   INFO: State changes, operations
+   DEBUG: Detailed tracking
+   WARNING: Recoverable issues
+   ERROR: Critical problems
+   CRITICAL: System failures
+   ```
+
+4. **Benefits**:
+   - Clear audit trail of operations
+   - Better debugging support
+   - Improved error tracking
+   - Performance monitoring
+   - State recovery support
+
+5. **Testing Strategy**:
+   - Unit tests for logger configuration
+   - Integration tests for log output
+   - Format verification
+   - Level-specific logging tests
+   - File handling tests
+
+This logging implementation supports our file-based communication strategy while providing comprehensive debugging and monitoring capabilities. 

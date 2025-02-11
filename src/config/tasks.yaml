@@ -24,6 +24,12 @@ task_templates:
       2. Source credibility assessment
       3. Complete bibliography with all sources
     agent: researcher
+    context:
+      - "Use web search tool to gather recent information"
+      - "Verify facts across multiple sources"
+      - "Include all citations from web search"
+      - "Evaluate source credibility"
+      - "Provide comprehensive analysis"
 
   writing_task:
     description: >
@@ -41,7 +47,11 @@ task_templates:
       including proper citations and a complete bibliography.
     agent: writer
     context:
-      - research_task
+      - "Use research findings as primary source"
+      - "Format in markdown with proper structure"
+      - "Include all citations from research"
+      - "Group related information logically"
+      - "Maintain citation format consistency"
 
   editing_task:
     description: >
@@ -55,28 +65,28 @@ task_templates:
       5. Verify that all claims are supported by sources
       6. Check for any gaps in information
       
-      Your response MUST start with one of these status indicators:
-      - "APPROVED: " if the content meets all requirements
-      - "NEEDS REVISION: " if any issues are found
+      Your response MUST:
+      1. Start with either "APPROVED: " or "NEEDS REVISION: "
+      2. If approved, provide a brief explanation of why
+      3. If needs revision, list specific issues that need to be addressed
+      4. Be concise and clear in your feedback
       
-      If revision is needed, clearly specify:
-      1. What specific issues need to be addressed
-      2. Which aspects need improvement
-      3. What additional information is required
+      Example approved format:
+      APPROVED: Content is accurate, well-organized, and properly cited. All requirements are met.
       
-      Format your response as:
-      APPROVED: [Quality assessment and positive points]
-      
-      OR
-      
+      Example revision format:
       NEEDS REVISION:
-      - [Issue 1 with specific details]
-      - [Issue 2 with specific details]
-      - [Required improvements]
+      - Citation missing for claim about X
+      - Section Y needs more detail
+      - Bibliography incomplete
     expected_output: >
-      A clear approval or detailed revision requirements for {topic},
-      starting with either "APPROVED: " or "NEEDS REVISION: "
+      A clear decision (APPROVED or NEEDS REVISION) with specific feedback about {topic}.
+      Must start with either "APPROVED: " or "NEEDS REVISION: " followed by detailed explanation.
     agent: editor
     context:
-      - research_task
-      - writing_task
+      - "Review research and writing content"
+      - "Verify citation accuracy and completeness"
+      - "Check topic coverage and organization"
+      - "Evaluate clarity and coherence"
+      - "Assess source support for claims"
+      - "Provide clear approval or revision requirements"

@@ -11,7 +11,8 @@ import streamlit as st
 from src.ui.components.chat import (
     initialize_chat_state,
     display_chat_messages,
-    handle_user_input
+    handle_user_input,
+    cleanup_resources
 )
 from src.utils import main_logger as logger
 
@@ -19,7 +20,7 @@ def initialize_app() -> None:
     """Initialize the Streamlit app."""
     logger.info("Initializing Streamlit application")
     
-    # Force a clean restart by clearing browser cache
+    # Set page config
     st.set_page_config(
         page_title="AI Research Assistant",
         page_icon="🔍",
@@ -31,21 +32,23 @@ def initialize_app() -> None:
         }
     )
     
-    # Clear all session state
-    if not st.session_state.get('_initialized'):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.session_state._initialized = True
-        logger.debug("Cleared session state")
+    # Clean up existing crew if present
+    if hasattr(st.session_state, 'crew') and st.session_state.crew is not None:
+        cleanup_resources()
     
-    logger.debug("Page configuration set")
+    # Initialize chat state
+    initialize_chat_state()
+    
+    # Register cleanup for app shutdown
+    if not hasattr(st.session_state, '_cleanup_registered'):
+        st.session_state._cleanup_registered = True
+        st.session_state.on_cleanup = cleanup_resources
+        logger.info("Registered cleanup handler")
 
 def main() -> None:
     """Main function to run the Streamlit app."""
     try:
         initialize_app()
-        initialize_chat_state()
-        logger.info("Application initialized successfully")
 
         # Header
         st.title("🔍 AI Research Assistant")
@@ -57,14 +60,12 @@ def main() -> None:
         - Finding recent developments
         - Summarizing complex information
         """)
-        logger.debug("Header and description displayed")
 
         # Chat interface
         st.divider()
         
         # Display chat messages
         display_chat_messages()
-        logger.debug("Chat messages displayed")
 
         # Chat input
         if prompt := st.chat_input("What would you like me to research?"):
@@ -74,6 +75,8 @@ def main() -> None:
     except Exception as e:
         logger.error(f"Application error: {str(e)}", exc_info=True)
         st.error("❌ An error occurred while running the application. Please check the logs for details.")
+        # Ensure cleanup on error
+        cleanup_resources()
 
 if __name__ == "__main__":
-    main() 
+    main()

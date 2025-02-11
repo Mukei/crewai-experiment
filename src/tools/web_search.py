@@ -5,9 +5,19 @@ from dataclasses import dataclass
 from datetime import datetime
 from serpapi import GoogleSearch
 from dotenv import load_dotenv
+from pydantic import BaseModel
+from crewai.tools import BaseTool
 from src.utils import web_search_logger as logger
+import logging
 
+# Load environment variables
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+class WebSearchInput(BaseModel):
+    """Input schema for web search tool."""
+    query: str
 
 @dataclass
 class SearchResult:
@@ -33,19 +43,39 @@ class SearchResult:
         date_str = f" (Published: {self.published_date})" if self.published_date else ""
         return f"[{self.reference_number}] {self.title} - {self.source}{date_str}\n    {self.link}"
 
-class WebSearchTool:
-    """Tool for performing web searches using SerpAPI with enhanced source tracking."""
-
+class WebSearchTool(BaseTool):
+    """Tool for performing web searches using SerpAPI."""
+    
+    name: str = "Web Search Tool"
+    description: str = "Search the web for information about a given topic"
+    api_key: Optional[str] = None
+    min_sources: int = 3
+    max_sources: int = 10
+    
     def __init__(self, min_sources: int = 3, max_sources: int = 10):
-        """Initialize the web search tool with configuration."""
-        logger.info("Initializing WebSearchTool")
+        """Initialize the web search tool."""
+        super().__init__()
         self.api_key = os.getenv("SERPAPI_KEY")
-        if not self.api_key:
-            logger.error("SERPAPI_KEY environment variable is missing")
-            raise ValueError("SERPAPI_KEY environment variable is required")
         self.min_sources = min_sources
         self.max_sources = max_sources
         logger.info(f"WebSearchTool initialized with min_sources={min_sources}, max_sources={max_sources}")
+        
+        if not self.api_key:
+            logger.warning("No SERPAPI_KEY found in environment variables")
+    
+    def _run(self, topic: str) -> str:
+        """Execute the web search for the given topic."""
+        try:
+            if not self.api_key:
+                return "⚠️ Web search is not available - SERPAPI_KEY is missing"
+                
+            # Use our proper search and summarize methods
+            results = self.search(topic)
+            return self.summarize_results(results)
+            
+        except Exception as e:
+            logger.error(f"Web search failed: {str(e)}", exc_info=True)
+            return f"⚠️ Web search failed: {str(e)}"
 
     def _calculate_relevance_score(self, result: dict) -> float:
         """Calculate a relevance score for a search result."""
@@ -84,15 +114,7 @@ class WebSearchTool:
         return None
 
     def search(self, query: str) -> List[SearchResult]:
-        """
-        Perform a web search using SerpAPI with enhanced result processing.
-        
-        Args:
-            query: The search query
-            
-        Returns:
-            List of SearchResult objects with metadata
-        """
+        """Perform a web search using SerpAPI with enhanced result processing."""
         logger.info(f"Performing search for query: {query}")
         params = {
             "engine": "google",
@@ -153,15 +175,7 @@ class WebSearchTool:
             raise
 
     def summarize_results(self, results: List[SearchResult]) -> str:
-        """
-        Create a markdown summary of search results with inline citations.
-        
-        Args:
-            results: List of SearchResult objects
-            
-        Returns:
-            Markdown formatted summary with inline citations and reference numbers
-        """
+        """Create a markdown summary of search results with inline citations."""
         logger.info(f"Summarizing {len(results)} search results")
         if not results:
             logger.warning("No results to summarize")
