@@ -6,16 +6,19 @@ from src.tools.web_search import WebSearchTool, SearchResult
 
 @pytest.fixture
 def mock_serper():
-    """Mock SerperDevTool responses."""
-    with patch("src.tools.web_search.SerperDevTool.run") as mock_run:
-        mock_run.return_value = "Test Title 1\nTest Title 2"
-        yield mock_run
+    """Mock the SerperDevTool's run method."""
+    with patch('crewai_tools.SerperDevTool._run') as mock:
+        mock.return_value = "Test Title 1\nTest Title 2"
+        yield mock
 
 @pytest.fixture
 def web_search_tool():
-    """Create a WebSearchTool instance with mock API key."""
-    with patch.dict("os.environ", {"SERPER_API_KEY": "test_key"}):
-        return WebSearchTool()
+    """Create a WebSearchTool instance for testing."""
+    return WebSearchTool(
+        api_key="test_key",
+        min_sources=3,
+        max_sources=10
+    )
 
 def test_search_result_formatting():
     """Test SearchResult formatting methods."""
@@ -23,40 +26,28 @@ def test_search_result_formatting():
         title="Test Title",
         snippet="Test Snippet",
         link="https://test.com/article",
+        reference_number=1,
         source="Test Source",
         published_date="January 1, 2024",
-        relevance_score=0.8,
-        reference_number=1
+        relevance_score=0.8
     )
     
     # Test inline citation
-    inline = result.to_inline_citation()
-    assert "[1]" in inline
-    assert "Test Snippet" in inline
+    assert result.to_inline_citation() == "Test Snippet [1]"
     
-    # Test markdown formatting
-    markdown = result.to_markdown()
-    assert "Test Snippet" in markdown
-    assert "[1]" in markdown
-    assert "https://test.com/article" in markdown
+    # Test markdown format
+    assert result.to_markdown() == "- Test Snippet [[1]](https://test.com/article)"
     
     # Test bibliography entry
-    bib = result.to_bibliography_entry()
-    assert "[1]" in bib
-    assert "Test Title" in bib
-    assert "Test Source" in bib
-    assert "January 1, 2024" in bib
+    assert result.to_bibliography_entry() == "[1] Test Title. Test Source (January 1, 2024). Available at: https://test.com/article"
 
 def test_search_with_results(web_search_tool, mock_serper):
     """Test search functionality with mock results."""
     results = web_search_tool.search("test query")
-    
     assert len(results) == 2
-    assert isinstance(results[0], SearchResult)
     assert results[0].title == "Test Title 1"
     assert results[1].title == "Test Title 2"
-    assert results[0].reference_number == 1
-    assert results[1].reference_number == 2
+    mock_serper.assert_called_once()
 
 def test_relevance_scoring(web_search_tool):
     """Test result relevance scoring."""
@@ -151,15 +142,16 @@ def test_reference_number_ordering(web_search_tool, mock_serper):
     assert results[0].reference_number == 1
     assert results[1].reference_number == 2
 
+def test_empty_results(web_search_tool, mock_serper):
+    """Test handling of empty search results."""
+    mock_serper.return_value = ""
+    results = web_search_tool.search("test query")
+    assert len(results) == 0
+
 def test_error_handling(web_search_tool, mock_serper):
     """Test error handling in search."""
     mock_serper.side_effect = Exception("API Error")
     
     with pytest.raises(Exception) as exc_info:
         web_search_tool.search("test query")
-    assert "Search error: API Error" in str(exc_info.value)
-
-def test_empty_results(web_search_tool):
-    """Test handling of empty results."""
-    summary = web_search_tool.summarize_results([])
-    assert summary == "No search results found." 
+    assert str(exc_info.value) == "Search error: API Error" 

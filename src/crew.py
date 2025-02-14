@@ -41,7 +41,7 @@ class ResearchCrew:
         
         # Initialize LLM and tools
         self._llm = self._create_llm()
-        self.web_search = WebSearchTool()
+        self.web_search = self._create_web_search_tool()
         
         # Register signal handlers if in main thread
         if threading.current_thread() is threading.main_thread():
@@ -64,115 +64,77 @@ class ResearchCrew:
         signal.signal(signal.SIGINT, cleanup_handler)
         signal.signal(signal.SIGTERM, cleanup_handler)
 
-    def _cleanup(self):
-        """Cleanup resources."""
-        errors = []
-        
-        # Clean up LLM
-        if hasattr(self, '_llm'):
-            try:
-                self._cleanup_llm()
-            except Exception as e:
-                errors.append(f"LLM cleanup error: {str(e)}")
-                logger.error(f"Error during LLM cleanup: {str(e)}")
-        
-        # Clean up file manager
-        if hasattr(self, '_file_manager'):
-            try:
-                self._file_manager.cleanup()
-            except Exception as e:
-                errors.append(f"File manager cleanup error: {str(e)}")
-                logger.error(f"Error during file manager cleanup: {str(e)}")
-        
-        # Clean up progress tracker
-        if hasattr(self, '_progress_tracker'):
-            try:
-                self._progress_tracker.cleanup()
-            except Exception as e:
-                errors.append(f"Progress tracker cleanup error: {str(e)}")
-                logger.error(f"Error during progress tracker cleanup: {str(e)}")
-        
-        # Log all errors if any occurred
-        if errors:
-            error_msg = "Multiple cleanup errors occurred:\n" + "\n".join(errors)
-            logger.error(error_msg)
-
     def cleanup(self):
         """Public method to cleanup resources."""
         try:
-            self._cleanup()
+            # Clean up LLM first
+            self._cleanup_llm()
+            
+            # Clean up file manager
+            if hasattr(self, '_file_manager'):
+                try:
+                    self._file_manager.cleanup()
+                except Exception as e:
+                    logger.error(f"Error during file manager cleanup: {str(e)}")
+            
+            # Clean up progress tracker
+            if hasattr(self, '_progress_tracker'):
+                try:
+                    self._progress_tracker.cleanup()
+                except Exception as e:
+                    logger.error(f"Error during progress tracker cleanup: {str(e)}")
+                    
         except Exception as e:
             logger.error(f"Error during cleanup: {str(e)}")
             # Don't re-raise to ensure cleanup completes
 
-    def _recover_state(self, session_id: str) -> None:
-        """Recover state from a previous session.
-        
-        Args:
-            session_id: Session ID to recover
-        """
-        try:
-            logger.info(f"Attempting to recover state for session {session_id}")
-            
-            # Recover file state
-            state = self._file_manager.recover_session(session_id)
-            if not state:
-                logger.warning("No file state found for recovery")
-                return
-            
-            # Recover progress
-            progress = self._progress_tracker.recover_progress()
-            if not progress:
-                logger.warning("No progress state found for recovery")
-                return
-            
-            logger.info("State recovered successfully")
-            self._report_progress(
-                "System",
-                progress.get("current_step", 0),
-                progress.get("total_steps", 3),
-                "Recovered previous session state"
-            )
-        except Exception as e:
-            logger.error(f"Error recovering state: {str(e)}")
-            self._progress_tracker.log_error(f"Failed to recover state: {str(e)}")
-
-    def save_checkpoint(self) -> None:
-        """Save a checkpoint of the current state."""
-        try:
-            logger.info("Saving checkpoint")
-            # Progress is automatically saved by ProgressTracker
-            # Files are automatically saved by FileManager
-            # Just log the checkpoint
-            self._progress_tracker.update_progress(
-                "System",
-                self._progress_tracker.get_current_progress().get("current_step", 0),
-                self._progress_tracker.get_current_progress().get("total_steps", 3),
-                "Checkpoint saved"
-            )
-            logger.info("Checkpoint saved successfully")
-        except Exception as e:
-            logger.error(f"Error saving checkpoint: {str(e)}")
-            self._progress_tracker.log_error(f"Failed to save checkpoint: {str(e)}")
-
-    def _handle_interrupt(self, signum, frame):
-        """Handle interrupt signals."""
-        logger.info(f"Received signal {signum}")
-        self.cleanup()
-        
-    def _report_progress(self, agent: str, step: int, total: int, status: str) -> None:
-        """Report progress through callback and tracker."""
-        try:
-            # Update progress tracker
-            self._progress_tracker.update_progress(agent, step, total, status)
-            
-            # Call progress callback if available
-            if self._progress_callback:
-                self._progress_callback(agent, step, total, status)
+    def _cleanup_llm(self) -> None:
+        """Clean up LLM resources safely."""
+        if hasattr(self, '_llm') and self._llm is not None:
+            try:
+                logger.info("Cleaning up LLM resources")
+                # Store the LLM instance temporarily
+                temp_llm = self._llm
+                self._llm = None
                 
-            logger.debug(f"Progress updated: {agent} - Step {step}/{total} - {status}")
+                # Clean up the old instance if it has a cleanup method
+                if hasattr(temp_llm, 'cleanup'):
+                    temp_llm.cleanup()
+                
+                logger.info("LLM resources cleaned up successfully")
+            except Exception as e:
+                logger.error(f"Error during LLM cleanup: {str(e)}")
+
+    def _create_web_search_tool(self):
+        """Create a CrewAI Tool for web search."""
+        logger.info("Creating web search tool")
+        
+        try:
+            web_search = WebSearchTool()
+            logger.info("Web search tool created successfully")
+            return web_search
         except Exception as e:
-            logger.error(f"Error in progress reporting: {str(e)}")
+            logger.error(f"Failed to create web search tool: {str(e)}")
+            return None
+
+    def _perform_web_search(self, topic: str) -> str:
+        """Perform a web search for the given topic."""
+        try:
+            if not self.web_search:
+                return "Web search is not available."
+                
+            logger.info(f"Performing web search for topic: {topic}")
+            results = self.web_search.search(topic)
+            logger.info(f"Found {len(results)} search results")
+            if not results:
+                return "No search results found for the topic."
+            summary = self.web_search.summarize_results(results)
+            logger.info("Search results summarized successfully")
+            return summary
+        except Exception as e:
+            error_msg = f"Web search failed: {str(e)}"
+            error_logger.error(error_msg, exc_info=True)
+            return error_msg
 
     def _load_llm_config(self) -> Dict:
         """Load LLM configuration from YAML."""
@@ -213,24 +175,6 @@ class ResearchCrew:
         except Exception as e:
             logger.error(f"Failed to create LLM: {str(e)}")
             raise
-
-    def _cleanup_llm(self) -> None:
-        """Clean up LLM resources safely."""
-        if hasattr(self, '_llm') and self._llm is not None:
-            try:
-                logger.info("Cleaning up LLM resources")
-                # Store the LLM instance temporarily
-                temp_llm = self._llm
-                self._llm = None
-                # Ensure we have a bit of time for pending operations
-                time.sleep(1)  # Increased wait time
-                # Clean up the old instance
-                if hasattr(temp_llm, 'cleanup'):
-                    temp_llm.cleanup()
-                del temp_llm
-                logger.info("LLM resources cleaned up successfully")
-            except Exception as e:
-                logger.error(f"Error during LLM cleanup: {str(e)}")
 
     def _recreate_llm(self) -> None:
         """Recreate the LLM instance if needed."""
@@ -284,41 +228,6 @@ class ResearchCrew:
             config = yaml.safe_load(f)
         logger.debug(f"Loaded {len(config['agents'])} agent configurations")
         return config['agents']
-
-    def _perform_web_search(self, topic: str) -> str:
-        """Perform web search for the given topic."""
-        if not self.web_search:
-            error_msg = "Web search is not available - please check your SERPAPI_KEY"
-            logger.warning(error_msg)
-            return error_msg
-        
-        try:
-            logger.info(f"Performing web search for topic: {topic}")
-            results = self.web_search.search(topic)
-            logger.info(f"Found {len(results)} search results")
-            if not results:
-                return "No search results found for the topic."
-            summary = self.web_search.summarize_results(results)
-            logger.info("Search results summarized successfully")
-            return summary
-        except Exception as e:
-            error_msg = f"Web search failed: {str(e)}"
-            error_logger.error(error_msg, exc_info=True)
-            return error_msg
-
-    def _create_web_search_tool(self):
-        """Create a CrewAI Tool for web search."""
-        logger.info("Creating web search tool")
-        
-        try:
-            web_search = WebSearchTool()
-            if not web_search.api_key:
-                logger.warning("Web search tool not available - SERPAPI_KEY missing")
-                return None
-            return web_search
-        except Exception as e:
-            logger.error(f"Failed to create web search tool: {str(e)}")
-            return None
 
     @agent
     def researcher(self) -> Agent:

@@ -13,15 +13,25 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-class SearchResult(BaseModel):
-    """Represents a single search result."""
-    title: str
-    snippet: str
-    link: str
-    source: Optional[str] = None
-    published_date: Optional[str] = None
-    relevance_score: float = 1.0
-    reference_number: int = 1
+class SearchResult:
+    """Class to store and format search results."""
+    def __init__(
+        self, 
+        title: str, 
+        snippet: str, 
+        link: str, 
+        reference_number: int,
+        source: Optional[str] = None,
+        published_date: Optional[str] = None,
+        relevance_score: float = 1.0
+    ):
+        self.title = title
+        self.snippet = snippet
+        self.link = link
+        self.reference_number = reference_number
+        self.source = source
+        self.published_date = published_date
+        self.relevance_score = relevance_score
 
     def to_inline_citation(self) -> str:
         """Format result as an inline citation."""
@@ -37,32 +47,64 @@ class SearchResult(BaseModel):
         return f"[{self.reference_number}] {self.title}. {self.source or 'Source'}{date_str}. Available at: {self.link}"
 
 class WebSearchTool(SerperDevTool):
-    """Tool for performing web searches using Serper.dev.
+    """Tool for performing web searches using the Serper API."""
     
-    This tool extends SerperDevTool to provide web search capabilities using the Serper.dev API.
-    It includes additional formatting and error handling specific to our application's needs.
-    """
-    
-    name: str = "Web Search"
-    description: str = "Search the web for current information on a given topic"
     min_sources: int = Field(default=3, description="Minimum number of sources to return")
     max_sources: int = Field(default=10, description="Maximum number of sources to return")
+    search_query: Optional[str] = Field(default=None, description="Current search query")
     
-    def __init__(self, min_sources: int = 3, max_sources: int = 10):
-        """Initialize the web search tool.
+    def search(self, query: str) -> List[SearchResult]:
+        """Execute the web search for the given topic."""
+        try:
+            # Set the query for the parent class
+            self.search_query = query
+            
+            # Call parent's _run method to perform the search
+            raw_results = self._run()
+            
+            if not raw_results:
+                return []
+            
+            # Parse and process results
+            results = []
+            for i, result in enumerate(raw_results.split('\n'), 1):
+                if not result.strip():
+                    continue
+                
+                # Create SearchResult object
+                search_result = SearchResult(
+                    title=result,
+                    snippet=result,
+                    link=f"Source {i}",  # Placeholder as SerperDevTool doesn't provide links
+                    reference_number=i
+                )
+                results.append(search_result)
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error during web search: {str(e)}")
+            raise Exception(f"Search error: {str(e)}")
+
+    def _run(self) -> str:
+        """Override parent's _run method to use the stored search query."""
+        if not self.search_query:
+            raise ValueError("No search query provided")
+        return super()._run()
+
+    def _format_results(self, results: List[SearchResult]) -> str:
+        """Format search results into a readable string."""
+        if not results:
+            return "No results found."
         
-        Args:
-            min_sources (int): Minimum number of sources to return
-            max_sources (int): Maximum number of sources to return
-        """
-        super().__init__()
-        self.min_sources = min_sources
-        self.max_sources = max_sources
-        logger.info(f"WebSearchTool initialized with min_sources={min_sources}, max_sources={max_sources}")
-        
-        # Check if API key is available
-        if not os.getenv("SERPER_API_KEY"):
-            logger.warning("No SERPER_API_KEY found in environment variables")
+        formatted = []
+        for result in results:
+            formatted.append(
+                f"[{result.reference_number}] {result.title}\n"
+                f"Link: {result.link}\n"
+                f"{result.snippet}\n"
+            )
+        return "\n".join(formatted)
 
     def _calculate_relevance_score(self, result: dict) -> float:
         """Calculate relevance score for a search result."""
@@ -107,39 +149,6 @@ class WebSearchTool(SerperDevTool):
                 return result['date']
         return None
 
-    def search(self, query: str) -> List[SearchResult]:
-        """Execute the web search for the given topic."""
-        try:
-            if not os.getenv("SERPER_API_KEY"):
-                raise ValueError("SERPER_API_KEY is missing")
-            
-            # Call parent's run method to perform the search
-            raw_results = super().run(query)
-            
-            if not raw_results:
-                return []
-            
-            # Parse and process results
-            results = []
-            for i, result in enumerate(raw_results.split('\n'), 1):
-                if not result.strip():
-                    continue
-                    
-                # Create SearchResult object
-                search_result = SearchResult(
-                    title=result,
-                    snippet=result,
-                    link=f"Source {i}",  # Placeholder as SerperDevTool doesn't provide links
-                    reference_number=i
-                )
-                results.append(search_result)
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error during web search: {str(e)}")
-            raise Exception(f"Search error: {str(e)}")
-
     def summarize_results(self, results: List[SearchResult]) -> str:
         """Summarize search results with proper formatting."""
         if not results:
@@ -164,5 +173,5 @@ class WebSearchTool(SerperDevTool):
         summary_parts.append("\n### References")
         for result in sorted_results:
             summary_parts.append(result.to_bibliography_entry())
-        
-        return "\n\n".join(summary_parts) 
+            
+        return "\n".join(summary_parts) 

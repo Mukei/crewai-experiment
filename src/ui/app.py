@@ -10,8 +10,8 @@ if project_root not in sys.path:
 import streamlit as st
 from src.ui.components.chat import (
     initialize_chat_state,
-    display_chat_messages,
-    handle_user_input,
+    display_chat_interface,
+    display_progress,
     cleanup_resources
 )
 from src.utils import main_logger as logger
@@ -32,12 +32,9 @@ def initialize_app() -> None:
         }
     )
     
-    # Clean up existing crew if present
-    if hasattr(st.session_state, 'crew') and st.session_state.crew is not None:
-        cleanup_resources()
-    
-    # Initialize chat state
-    initialize_chat_state()
+    # Initialize chat state if not already initialized
+    if not hasattr(st.session_state, 'messages'):
+        initialize_chat_state()
     
     # Register cleanup for app shutdown
     if not hasattr(st.session_state, '_cleanup_registered'):
@@ -45,38 +42,39 @@ def initialize_app() -> None:
         st.session_state.on_cleanup = cleanup_resources
         logger.info("Registered cleanup handler")
 
-def main() -> None:
-    """Main function to run the Streamlit app."""
+def main():
+    """Main application entry point."""
     try:
+        # Initialize app
         initialize_app()
-
-        # Header
+        
+        # Display header
         st.title("🔍 AI Research Assistant")
         st.markdown("""
-        Ask me to research any topic, and I'll provide a comprehensive analysis.
-        
-        I can help you with:
-        - Topic research and analysis
-        - Finding recent developments
-        - Summarizing complex information
+        Welcome to the AI Research Assistant! Enter a topic you'd like to research,
+        and our AI crew will help you find and analyze relevant information.
         """)
-
-        # Chat interface
-        st.divider()
         
-        # Display chat messages
-        display_chat_messages()
-
-        # Chat input
-        if prompt := st.chat_input("What would you like me to research?"):
-            logger.info(f"New chat input received: {prompt}")
-            handle_user_input(prompt)
+        # Create columns for layout
+        chat_col, progress_col = st.columns([2, 1])
+        
+        # Display chat interface in main column
+        with chat_col:
+            display_chat_interface()
+        
+        # Display progress in sidebar
+        with progress_col:
+            display_progress()
             
     except Exception as e:
-        logger.error(f"Application error: {str(e)}", exc_info=True)
-        st.error("❌ An error occurred while running the application. Please check the logs for details.")
-        # Ensure cleanup on error
-        cleanup_resources()
+        logger.error(f"Error in main app: {str(e)}", exc_info=True)
+        st.error(f"An error occurred: {str(e)}")
+        
+    finally:
+        # Ensure cleanup is registered
+        if not hasattr(st.session_state, '_cleanup_registered'):
+            st.session_state._cleanup_registered = True
+            st.session_state.on_cleanup = cleanup_resources
 
 if __name__ == "__main__":
     main()

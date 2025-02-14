@@ -14,7 +14,7 @@ def cleanup_resources() -> None:
     if hasattr(st.session_state, 'crew') and st.session_state.crew is not None:
         try:
             logger.info("Cleaning up crew resources")
-            st.session_state.crew.cleanup()  # This will call _cleanup_llm and other cleanup methods
+            st.session_state.crew.cleanup()
             st.session_state.crew = None
             logger.info("Crew resources cleaned up successfully")
         except Exception as e:
@@ -131,61 +131,64 @@ def recover_session(session_id: str) -> None:
         logger.error(error_msg)
         st.error(error_msg)
 
-def update_progress(agent: str, current_step: int, total_steps: int, status: str) -> None:
-    """Update progress bar.
-    
-    Args:
-        agent: Name of the agent making progress
-        current_step: Current step number
-        total_steps: Total number of steps
-        status: Current status message
-    """
-    st.session_state.current_step = current_step
-    st.session_state.total_steps = total_steps
+def update_progress(agent: str, step: int, total: int, status: str) -> None:
+    """Update progress in the UI."""
+    st.session_state.progress = step / total if total > 0 else 0
+    st.session_state.current_step = step
+    st.session_state.total_steps = total
     st.session_state.status = status
-    st.session_state.progress = f"{agent}: {status}"
+    st.experimental_rerun()
+
+def process_user_input(user_input: str) -> None:
+    """Process user input and update chat."""
+    if not user_input:
+        return
+
+    # Add user message
+    st.session_state.messages.append({"role": "user", "content": user_input})
+
+    try:
+        # Process with crew
+        if st.session_state.crew:
+            logger.info("New chat input received: " + user_input)
+            result = st.session_state.crew.process_with_revisions(user_input)
+            
+            # Add assistant message
+            st.session_state.messages.append({"role": "assistant", "content": result})
+            
+            # Update display
+            display_research_dashboard(st.session_state.crew)
+        else:
+            error_msg = "Error: Research crew not initialized"
+            st.session_state.messages.append({"role": "assistant", "content": error_msg})
+            logger.error(error_msg)
+            
+    except Exception as e:
+        error_msg = f"Error processing input: {str(e)}"
+        st.session_state.messages.append({"role": "assistant", "content": error_msg})
+        error_logger.error(error_msg, exc_info=True)
 
 def display_chat_interface() -> None:
-    """Display chat interface."""
+    """Display the chat interface."""
+    # Initialize state if needed
+    if not hasattr(st.session_state, 'messages'):
+        initialize_chat_state()
+
     # Display messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Display progress if available
-    if st.session_state.progress:
-        progress = st.session_state.current_step / max(st.session_state.total_steps, 1)
-        st.progress(progress)
-        st.info(f"{st.session_state.status}: {st.session_state.progress}")
+    # Chat input
+    if user_input := st.chat_input("Enter your research topic..."):
+        process_user_input(user_input)
 
-def process_user_input(prompt: str) -> None:
-    """Process user input."""
-    if not prompt:
-        return
-
-    # Add user message
-    st.session_state.messages.append({"role": "user", "content": prompt})
-
-    # Get crew response
-    try:
-        crew = st.session_state.crew
-        response = crew.process_with_revisions(prompt)
-        
-        # Add assistant message
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": response
-        })
-        
-        # Display session info
-        display_session_info()
-        
-    except Exception as e:
-        logger.error(f"Error processing input: {e}")
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": f"❌ Error: {str(e)}"
-        })
+def display_progress() -> None:
+    """Display progress information."""
+    if hasattr(st.session_state, 'progress') and st.session_state.progress is not None:
+        st.sidebar.progress(st.session_state.progress)
+        st.sidebar.text(f"Step {st.session_state.current_step}/{st.session_state.total_steps}")
+        st.sidebar.text(st.session_state.status)
 
 def format_message(content: str) -> Dict[str, str]:
     """Format message content based on its type."""
@@ -236,17 +239,16 @@ def handle_user_input(prompt: str) -> None:
     logger.info(f"Processing user input: {prompt}")
     
     try:
-        # Add user message and rerun to show it immediately
+        # Add user message
         st.session_state.messages.append({
             "role": "user",
             "content": prompt
         })
-        st.rerun()
         
         # Process with crew and show progress
         with st.spinner("🤖 Processing your request..."):
             try:
-                # Initialize crew with topic
+                # Get response
                 response = st.session_state.crew.process_with_revisions(topic=prompt)
                 
                 # Handle response
@@ -284,15 +286,16 @@ def handle_user_input(prompt: str) -> None:
                     # Display research dashboard if available
                     if hasattr(st.session_state.crew, '_file_manager'):
                         display_research_dashboard(st.session_state.crew)
-                    
-                    # Force a rerun to update the UI immediately
-                    st.rerun()
-            finally:
-                # Ensure cleanup is called after processing
-                if hasattr(st.session_state.crew, '_cleanup_llm'):
-                    logger.info("Cleaning up LLM resources")
-                    st.session_state.crew._cleanup_llm()
-                    
+                
+            except Exception as e:
+                error_msg = f"❌ Error: {str(e)}"
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": error_msg
+                })
+                st.error(error_msg)
+                logger.error(f"Error processing user input: {str(e)}", exc_info=True)
+                
     except Exception as e:
         error_msg = f"❌ Error: {str(e)}"
         st.session_state.messages.append({
@@ -301,7 +304,3 @@ def handle_user_input(prompt: str) -> None:
         })
         st.error(error_msg)
         logger.error(f"Error processing user input: {str(e)}", exc_info=True)
-        # Ensure cleanup even on error
-        if hasattr(st.session_state.crew, '_cleanup_llm'):
-            logger.info("Cleaning up LLM resources after error")
-            st.session_state.crew._cleanup_llm()

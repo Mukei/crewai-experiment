@@ -27,12 +27,16 @@ def test_web_search():
             query = "Latest AI developments 2024"
             print(f"Query: {query}")
             
-            # Execute search using the tool's run method
+            # Execute search using the tool's search method
             print("\nExecuting search...")
-            results = tool.run(query)
+            results = tool.search(query)
             
             print("\nSearch Results:")
-            print(results)
+            for result in results:
+                print(f"\nTitle: {result.title}")
+                print(f"Snippet: {result.snippet}")
+                print(f"Link: {result.link}")
+                print(f"Reference: [{result.reference_number}]")
             
         except Exception as e:
             print(f"\nError during search: {str(e)}")
