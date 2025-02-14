@@ -421,7 +421,7 @@ class ResearchCrew:
                 self.writing_task(),
                 self.editing_task()
             ],
-            verbose=True
+            verbose=False  # Disable verbose mode
         )
 
     def process_with_revisions(self, topic: Optional[str] = None, max_revisions: int = 3) -> str:

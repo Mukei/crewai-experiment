@@ -236,11 +236,12 @@ def handle_user_input(prompt: str) -> None:
     logger.info(f"Processing user input: {prompt}")
     
     try:
-        # Add user message
+        # Add user message and rerun to show it immediately
         st.session_state.messages.append({
             "role": "user",
             "content": prompt
         })
+        st.rerun()
         
         # Process with crew and show progress
         with st.spinner("🤖 Processing your request..."):
@@ -266,15 +267,12 @@ def handle_user_input(prompt: str) -> None:
                     st.error(error_msg)
                     logger.error(f"Error in crew execution: {response}")
                 else:
-                    # Check for editor decision
+                    # Format response based on editor decision
                     if "APPROVED:" in response:
-                        # Remove the APPROVED prefix and format response
                         formatted_response = response.replace("APPROVED:", "✅")
                     elif "NEEDS REVISION:" in response:
-                        # Keep the NEEDS REVISION prefix and format response
                         formatted_response = response.replace("NEEDS REVISION:", "⚠️")
                     else:
-                        # No decision prefix found, use response as is
                         formatted_response = response
                     
                     # Add formatted response to chat
